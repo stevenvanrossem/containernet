@@ -61,6 +61,7 @@ import docker
 import json
 from subprocess import Popen, PIPE, check_output
 from time import sleep
+from threading import Thread
 
 from mininet.log import info, error, warn, debug
 from mininet.util import ( quietRun, errRun, errFail, moveIntf, isShellBuiltin,
@@ -866,12 +867,15 @@ class Docker ( Host ):
         return Host.popen( self, *args, mncmd=mncmd, **kwargs )
 
     def cmd(self, *args, **kwargs ):
-        """We cannot use the default Mininet cmd(), it seems to be not thread-safe.
+        """
+        We cannot use the default Mininet cmd(), it seems to be not thread-safe.
         The poll function in self.waitOutput can block when executing commands in Docker host.
         Therefore propose to use the docker-py supported function for executing commands in Docker containers,
         to avoid waitOutput
         The Mininet mechanism to monitor stdout with a sentinel seems not very Docker compatible and
-        should be revised... """
+        should be revised...
+        """
+
         verbose = kwargs.get('verbose', False)
         # Allow sendCmd( [ list ] )
         cmd = ''
@@ -891,23 +895,41 @@ class Docker ( Host ):
             self.waiting = False
             return ''
 
-        exec_dict = self.dcli.exec_create(self.dc, cmd, privileged=True)
-        out = self.dcli.exec_start(exec_dict)
-        log = info if verbose else debug
-        log('*** %s : %s\n' % (self.name, args))
-        #info("cmd: {0} \noutput:{1}".format(cmd, out))
-        self.waiting = False
-        return out
 
-        '''
-        """Send a command, wait for output, and return it.
-           cmd: string"""
+        """
+        Execute the command in a thread so containernet is not blocked.
+        This is the safest option e.g. if the cmd is a script, non-thread execution blocks the CLI for some reason        
+        """
+        thread = kwargs.get('detach', False)
+        if thread == True:
+            info("*** {0}: start docker cmd:{1}\n".format(self.name, cmd))
+            exec_dict = self.dcli.exec_create(self.dc, cmd, privileged=True, tty=True, stdout=False, stderr=False)
+            self.thread = Thread(target=self.dcli.exec_start,
+                                 args =(exec_dict,), kwargs=dict( tty=True))
+            self.thread.daemon = True
+            self.thread.start()
+            return
+        else:
+            exec_dict = self.dcli.exec_create(self.dc, cmd, privileged=True)
+            out = self.dcli.exec_start(exec_dict)
+            log = info if verbose else debug
+            log('*** %s : %s\n' % (self.name, args))
+            debug("cmd: {0} \noutput:{1}".format(cmd, out))
+            self.waiting = False
+            return out
+
+        """
+        Original method (causes waiting loops sometimes):
+        Send a command, wait for output, and return it.
+           cmd: string
+        """
+        """
         verbose = kwargs.get( 'verbose', False )
         log = info if verbose else debug
         log( '*** %s : %s\n' % ( self.name, args ) )
         self.sendCmd( *args, **kwargs )
         return self.waitOutput( verbose )
-        '''
+        """
 
     def _get_pid(self):
         state = self.dcinfo.get("State", None)
