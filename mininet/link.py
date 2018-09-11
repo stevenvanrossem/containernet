@@ -320,7 +320,6 @@ class TCIntf( Intf ):
                 latency_ms=None, enable_ecn=False, enable_red=False,
                 max_queue_size=None, **params ):
         "Configure the port and set its properties."
-
         result = Intf.config( self, **params)
 
         # Disable GRO
@@ -534,5 +533,6 @@ class TCLink( Link ):
                        cls1=TCIntf,
                        cls2=TCIntf,
                        addr1=addr1, addr2=addr2,
-                       params1=params,
-                       params2=params )
+                       params1=params.get("params1"),
+                       params2=params.get("params2"))
+
